@@ -204,6 +204,12 @@ namespace godot {
 		ClassDB::bind_method(D_METHOD("set_sample_rate", "sample_rate"), &SpectrumVisualizer::set_sample_rate);
 		ClassDB::bind_method(D_METHOD("get_sample_rate"), &SpectrumVisualizer::get_sample_rate);
 
+		ClassDB::bind_method(D_METHOD("set_virtual_size", "size"), &SpectrumVisualizer::set_virtual_size);
+		ClassDB::bind_method(D_METHOD("get_virtual_size"), &SpectrumVisualizer::get_virtual_size);
+
+		ClassDB::bind_method(D_METHOD("set_view_offset", "offset"), &SpectrumVisualizer::set_view_offset);
+		ClassDB::bind_method(D_METHOD("get_view_offset"), &SpectrumVisualizer::get_view_offset);
+
 		ClassDB::bind_method(D_METHOD("set_color_bottom", "color"), &SpectrumVisualizer::set_color_bottom);
 		ClassDB::bind_method(D_METHOD("get_color_bottom"), &SpectrumVisualizer::get_color_bottom);
 
@@ -277,6 +283,8 @@ namespace godot {
 		ClassDB::bind_method(D_METHOD("get_audio_duration"), &SpectrumVisualizer::get_audio_duration);
 
 		ADD_PROPERTY(PropertyInfo(Variant::INT, "sample_rate"), "set_sample_rate", "get_sample_rate");
+		ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "virtual_size"), "set_virtual_size", "get_virtual_size");
+		ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "view_offset"), "set_view_offset", "get_view_offset");
 
 		ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_bottom"), "set_color_bottom", "get_color_bottom");
 		ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color_lower"), "set_color_lower", "get_color_lower");
@@ -482,6 +490,10 @@ namespace godot {
 		const int window_samples = clamp_int((int)std::ceil(time_window * (float)sample_rate), 1, total_samples);
 		const int visible_samples = show_full_audio ? total_samples : window_samples;
 		const int visible_start_sample = std::max(0, total_samples - visible_samples);
+		const int virtual_width = virtual_size.x > 0 ? virtual_size.x : image_width;
+		const int virtual_height = virtual_size.y > 0 ? virtual_size.y : image_height;
+		const int horizontal_offset = clamp_int(view_offset.x, 0, std::max(0, virtual_width - image_width));
+		const int vertical_offset = clamp_int(view_offset.y, 0, std::max(0, virtual_height - image_height));
 
 		int time_slices = image_width;
 		int freq_bins = fft_size / 2 + 1;
@@ -496,7 +508,12 @@ namespace godot {
 		const int target_rows = image_height;
 
 		for (int time_idx = 0; time_idx < target_cols; time_idx++) {
-			const float t = target_cols <= 1 ? 0.0f : (float)time_idx / (float)(target_cols - 1);
+			const int virtual_x = time_idx + horizontal_offset;
+			if (virtual_x < 0 || virtual_x >= virtual_width) {
+				continue;
+			}
+
+			const float t = virtual_width <= 1 ? 0.0f : (float)virtual_x / (float)(virtual_width - 1);
 			const int sample_center = visible_start_sample + (int)std::lround(t * (float)(visible_samples - 1));
 			const int sample_offset = sample_center - fft_size / 2;
 
@@ -517,7 +534,12 @@ namespace godot {
 			const int max_freq_idx = std::min(freq_bins - 1, (int)magnitude_spectrum.size() - 1);
 
 			for (int y = 0; y < target_rows; y++) {
-				const float fy = target_rows <= 1 ? 0.0f : (float)y / (float)(target_rows - 1);
+				const int virtual_y = y + vertical_offset;
+				if (virtual_y < 0 || virtual_y >= virtual_height) {
+					continue;
+				}
+
+				const float fy = virtual_height <= 1 ? 0.0f : (float)virtual_y / (float)(virtual_height - 1);
 				int freq_idx = 0;
 
 				if (use_log_frequency && max_freq_idx > 1) {
@@ -592,6 +614,32 @@ namespace godot {
 
 	int SpectrumVisualizer::get_sample_rate() const {
 		return sample_rate;
+	}
+
+	void SpectrumVisualizer::set_virtual_size(const Vector2i& p_size) {
+		if (virtual_size == p_size) {
+			return;
+		}
+
+		virtual_size = p_size;
+		regenerate_if_ready();
+	}
+
+	Vector2i SpectrumVisualizer::get_virtual_size() const {
+		return virtual_size;
+	}
+
+	void SpectrumVisualizer::set_view_offset(const Vector2i& p_offset) {
+		if (view_offset == p_offset) {
+			return;
+		}
+
+		view_offset = p_offset;
+		regenerate_if_ready();
+	}
+
+	Vector2i SpectrumVisualizer::get_view_offset() const {
+		return view_offset;
 	}
 
 	void SpectrumVisualizer::set_color_bottom(const Color& p_color) {

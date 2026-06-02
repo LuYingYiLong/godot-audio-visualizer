@@ -18,6 +18,54 @@ namespace godot {
 				AudioVisualizerBusUtils::clamp_float(p_sample.x * gain, -1.0f, 1.0f),
 				AudioVisualizerBusUtils::clamp_float(p_sample.y * gain, -1.0f, 1.0f));
 		}
+
+		PackedVector2Array get_distinct_points(const PackedVector2Array& p_points) {
+			PackedVector2Array result;
+			const int count = p_points.size();
+			if (count <= 0) {
+				return result;
+			}
+
+			result.resize(count);
+			int write_index = 0;
+			Vector2 previous;
+			for (int i = 0; i < count; i++) {
+				const Vector2 current = p_points[i];
+				const float dx = write_index > 0 ? current.x - previous.x : 1.0f;
+				const float dy = write_index > 0 ? current.y - previous.y : 1.0f;
+				if (write_index == 0 || dx * dx + dy * dy > 0.01f) {
+					result.set(write_index, current);
+					previous = current;
+					write_index++;
+				}
+			}
+
+			result.resize(write_index);
+			return result;
+		}
+
+		void draw_safe_polyline(CanvasItem* p_item, const PackedVector2Array& p_points, const Color& p_color, float p_width) {
+			if (!p_item) {
+				return;
+			}
+
+			const PackedVector2Array line_points = get_distinct_points(p_points);
+			const int count = line_points.size();
+			if (count <= 1) {
+				return;
+			}
+
+			const float width = std::max(1.0f, p_width);
+			for (int i = 1; i < count; i++) {
+				const Vector2 previous = line_points[i - 1];
+				const Vector2 current = line_points[i];
+				const float dx = current.x - previous.x;
+				const float dy = current.y - previous.y;
+				if (dx * dx + dy * dy > 0.01f) {
+					p_item->draw_line(previous, current, p_color, width, true);
+				}
+			}
+		}
 	}
 
 	void OscilloscopeVisualizer::_bind_methods() {
@@ -275,8 +323,8 @@ namespace godot {
 			right_points.set(i, Vector2(x, right_center - sample.y * half_height));
 		}
 
-		draw_polyline(left_points, left_color, line_width, true);
-		draw_polyline(right_points, right_color, line_width, true);
+		draw_safe_polyline(this, left_points, left_color, line_width);
+		draw_safe_polyline(this, right_points, right_color, line_width);
 	}
 
 	void OscilloscopeVisualizer::draw_xy(const Rect2& p_rect, bool p_lissajous) {
@@ -303,15 +351,20 @@ namespace godot {
 		}
 
 		if (xy_render_mode == XY_RENDER_MODE_LINE) {
-			draw_polyline(xy_points, xy_color, xy_line_width, true);
+			draw_safe_polyline(this, xy_points, xy_color, xy_line_width);
 			return;
 		}
 
 		if (xy_render_mode == XY_RENDER_MODE_PHOSPHOR) {
-			if (xy_glow_width > 0.0f) {
-				draw_xy_segment_trail(xy_points, xy_glow_color, xy_glow_width, xy_persistence);
+			const PackedVector2Array line_points = get_distinct_points(xy_points);
+			if (line_points.size() <= 1) {
+				return;
 			}
-			draw_xy_segment_trail(xy_points, xy_color, xy_line_width, xy_persistence * 0.5f);
+
+			if (xy_glow_width > 0.0f) {
+				draw_xy_segment_trail(line_points, xy_glow_color, xy_glow_width, xy_persistence);
+			}
+			draw_xy_segment_trail(line_points, xy_color, xy_line_width, xy_persistence * 0.5f);
 			return;
 		}
 
@@ -370,6 +423,12 @@ namespace godot {
 		const float alpha_floor = 0.06f + 0.5f * persistence;
 
 		for (int i = 1; i < count; i++) {
+			const float dx = p_points[i].x - p_points[i - 1].x;
+			const float dy = p_points[i].y - p_points[i - 1].y;
+			if (dx * dx + dy * dy <= 0.01f) {
+				continue;
+			}
+
 			const float age = (float)i / (float)(count - 1);
 			const float fade = alpha_floor + (1.0f - alpha_floor) * age;
 			Color color = p_color;

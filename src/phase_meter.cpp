@@ -278,6 +278,12 @@ namespace godot {
 		const float pad = std::max(0.0f, content_padding);
 		const float label_space = draw_labels ? static_cast<float>(label_font_size) + 4.0f : 0.0f;
 
+		if (meter_style == METER_STYLE_GAUGE) {
+			return Rect2(
+				Vector2(pad, pad),
+				Vector2(std::max(1.0f, size.x - pad * 2.0f), std::max(1.0f, size.y - pad * 2.0f)));
+		}
+
 		if (orientation == ORIENTATION_VERTICAL) {
 			return Rect2(
 				Vector2(pad, pad),
@@ -456,10 +462,18 @@ namespace godot {
 	}
 
 	void PhaseMeter::draw_gauge_meter(const Rect2& p_rect) {
+		if (p_rect.size.x < 12.0f || p_rect.size.y < 12.0f) {
+			return;
+		}
+
 		const float value = AudioVisualizerBusUtils::clamp_float(displayed_phase, -1.0f, 1.0f);
-		const float radius = std::max(1.0f, std::min(p_rect.size.x * 0.46f, p_rect.size.y * 0.82f));
+		const float radius = std::min(p_rect.size.x * 0.46f, p_rect.size.y * 0.82f);
+		if (radius < 6.0f) {
+			return;
+		}
+
 		const Vector2 center(p_rect.position.x + p_rect.size.x * 0.5f, p_rect.position.y + std::min(p_rect.size.y - 1.0f, radius + p_rect.size.y * 0.42f));
-		const float arc_width = std::max(1.0f, gauge_arc_width);
+		const float arc_width = std::min(std::max(1.0f, gauge_arc_width), std::max(1.0f, radius * 0.32f));
 
 		draw_gauge_arc(center, radius, -1.0f, -0.05f, negative_color, arc_width);
 		draw_gauge_arc(center, radius, -0.05f, 0.05f, neutral_color, arc_width);
@@ -471,7 +485,7 @@ namespace godot {
 				const float tick_phase = -1.0f + 2.0f * static_cast<float>(i) / static_cast<float>(ticks);
 				const float angle = phase_to_gauge_angle(tick_phase);
 				const Vector2 outer(center.x + std::cos(angle) * radius, center.y + std::sin(angle) * radius);
-				const float inner_radius = radius - arc_width - (i == ticks / 2 ? 7.0f : 4.0f);
+				const float inner_radius = std::max(1.0f, radius - arc_width - (i == ticks / 2 ? 7.0f : 4.0f));
 				const Vector2 inner(center.x + std::cos(angle) * inner_radius, center.y + std::sin(angle) * inner_radius);
 				draw_line(inner, outer, tick_color, i == ticks / 2 ? 2.0f : 1.0f, true);
 			}
@@ -509,19 +523,28 @@ namespace godot {
 	}
 
 	void PhaseMeter::draw_gauge_arc(const Vector2& p_center, float p_radius, float p_from_value, float p_to_value, const Color& p_color, float p_width) {
-		const int point_count = 24;
-		PackedVector2Array points;
-		points.resize(point_count);
-		const float from_angle = phase_to_gauge_angle(p_from_value);
-		const float to_angle = phase_to_gauge_angle(p_to_value);
-
-		for (int i = 0; i < point_count; i++) {
-			const float t = static_cast<float>(i) / static_cast<float>(point_count - 1);
-			const float angle = from_angle + (to_angle - from_angle) * t;
-			points.set(i, Vector2(p_center.x + std::cos(angle) * p_radius, p_center.y + std::sin(angle) * p_radius));
+		if (p_radius < 6.0f || p_width <= 0.0f) {
+			return;
 		}
 
-		draw_polyline(points, p_color, p_width, true);
+		const float from_angle = phase_to_gauge_angle(p_from_value);
+		const float to_angle = phase_to_gauge_angle(p_to_value);
+		const float angle_span = std::abs(to_angle - from_angle);
+		const int point_count = std::max(4, std::min(48, static_cast<int>(std::ceil(angle_span * p_radius * 0.75f))));
+		const float width = std::min(std::max(1.0f, p_width), std::max(1.0f, p_radius * 0.5f));
+
+		Vector2 previous(p_center.x + std::cos(from_angle) * p_radius, p_center.y + std::sin(from_angle) * p_radius);
+		for (int i = 0; i < point_count; i++) {
+			const float t = static_cast<float>(i + 1) / static_cast<float>(point_count);
+			const float angle = from_angle + (to_angle - from_angle) * t;
+			const Vector2 current(p_center.x + std::cos(angle) * p_radius, p_center.y + std::sin(angle) * p_radius);
+			const float dx = current.x - previous.x;
+			const float dy = current.y - previous.y;
+			if (dx * dx + dy * dy > 0.01f) {
+				draw_line(previous, current, p_color, width, true);
+			}
+			previous = current;
+		}
 	}
 
 	void PhaseMeter::draw_horizontal_labels(const Rect2& p_rect) {

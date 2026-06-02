@@ -27,6 +27,8 @@ namespace godot {
 		// 显示参数
 		Ref<Image> spectrum_image;
 		Ref<ImageTexture> spectrum_texture;
+		Vector2i virtual_size = Vector2i(0, 0);
+		Vector2i view_offset = Vector2i(0, 0);
 
 		// 颜色配置
 		Color color_bottom = Color(0, 0, 0.1f, 1);
@@ -93,6 +95,12 @@ namespace godot {
 		PackedFloat32Array get_audio_samples() const;
 		void set_sample_rate(int p_sample_rate);
 		int get_sample_rate() const;
+
+		void set_virtual_size(const Vector2i& p_size);
+		Vector2i get_virtual_size() const;
+
+		void set_view_offset(const Vector2i& p_offset);
+		Vector2i get_view_offset() const;
 
 		// 颜色配置
 		void set_color_bottom(const Color& p_color);

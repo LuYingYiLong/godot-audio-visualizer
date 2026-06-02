@@ -21,6 +21,47 @@ namespace godot {
 		Color mix_color(const Color& p_from, const Color& p_to, float p_weight) {
 			return p_from.lerp(p_to, AudioVisualizerBusUtils::clamp_float(p_weight, 0.0f, 1.0f));
 		}
+
+		float polygon_area(const PackedVector2Array& p_points) {
+			const int count = p_points.size();
+			if (count < 3) {
+				return 0.0f;
+			}
+
+			double area = 0.0;
+			for (int i = 0; i < count; i++) {
+				const Vector2 current = p_points[i];
+				const Vector2 next = p_points[(i + 1) % count];
+				area += (double)current.x * (double)next.y - (double)next.x * (double)current.y;
+			}
+
+			return (float)std::abs(area * 0.5);
+		}
+
+		PackedVector2Array remove_consecutive_duplicates(const PackedVector2Array& p_points) {
+			PackedVector2Array result;
+			const int count = p_points.size();
+			if (count <= 0) {
+				return result;
+			}
+
+			result.resize(count);
+			int write_index = 0;
+			Vector2 previous;
+			for (int i = 0; i < count; i++) {
+				const Vector2 current = p_points[i];
+				const float dx = write_index > 0 ? current.x - previous.x : 1.0f;
+				const float dy = write_index > 0 ? current.y - previous.y : 1.0f;
+				if (write_index == 0 || dx * dx + dy * dy > 0.01f) {
+					result.set(write_index, current);
+					previous = current;
+					write_index++;
+				}
+			}
+
+			result.resize(write_index);
+			return result;
+		}
 	}
 
 	void RealtimeSpectrumVisualizer::_bind_methods() {
@@ -341,26 +382,51 @@ namespace godot {
 			return;
 		}
 
+		if (p_rect.size.x < 2.0f || p_rect.size.y < 2.0f) {
+			return;
+		}
+
 		PackedVector2Array points;
 		points.resize(bar_count);
+		const float bottom = p_rect.position.y + p_rect.size.y;
+		bool has_fill_area = false;
 		for (int i = 0; i < bar_count; i++) {
 			const float x = p_rect.position.x + ((float)i / (float)(bar_count - 1)) * p_rect.size.x;
 			const float normalized = AudioVisualizerBusUtils::db_to_normalized(current_db[(size_t)i], min_db, max_db);
-			points.set(i, Vector2(x, normalized_to_y(normalized, p_rect.position.y, p_rect.size.y)));
+			const float y = normalized_to_y(normalized, p_rect.position.y, p_rect.size.y);
+			points.set(i, Vector2(x, y));
+			if (y < bottom - 0.01f) {
+				has_fill_area = true;
+			}
 		}
 
-		if (p_filled) {
+		if (p_filled && has_fill_area) {
 			PackedVector2Array polygon;
 			polygon.resize(bar_count + 2);
-			polygon.set(0, Vector2(p_rect.position.x, p_rect.position.y + p_rect.size.y));
+			polygon.set(0, Vector2(p_rect.position.x, bottom));
 			for (int i = 0; i < bar_count; i++) {
 				polygon.set(i + 1, points[i]);
 			}
-			polygon.set(bar_count + 1, Vector2(p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y));
-			draw_colored_polygon(polygon, fill_color);
+			polygon.set(bar_count + 1, Vector2(p_rect.position.x + p_rect.size.x, bottom));
+
+			const PackedVector2Array safe_polygon = remove_consecutive_duplicates(polygon);
+			if (polygon_area(safe_polygon) > 0.01f) {
+				draw_colored_polygon(safe_polygon, fill_color);
+			}
 		}
 
-		draw_polyline(points, line_color, line_width, true);
+		const PackedVector2Array line_points = remove_consecutive_duplicates(points);
+		const int line_count = line_points.size();
+		const float width = std::min(std::max(1.0f, line_width), std::max(1.0f, std::min(p_rect.size.x, p_rect.size.y) * 0.5f));
+		for (int i = 1; i < line_count; i++) {
+			const Vector2 previous = line_points[i - 1];
+			const Vector2 current = line_points[i];
+			const float dx = current.x - previous.x;
+			const float dy = current.y - previous.y;
+			if (dx * dx + dy * dy > 0.01f) {
+				draw_line(previous, current, line_color, width, true);
+			}
+		}
 	}
 
 	void RealtimeSpectrumVisualizer::draw_peak_marks(const Rect2& p_rect) {
