@@ -8,6 +8,8 @@
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
 #include <algorithm>
@@ -59,18 +61,11 @@ namespace godot {
 			}
 
 			Object* get_fmod_audio_bus(const StringName& p_bus_name) {
-				Object* layout = get_fmod_audio_bus_layout();
-				if (!layout) {
+				if (!ClassDB::class_exists(StringName("FmodServer"))) {
 					return nullptr;
 				}
 
-				const String bus_name = String(p_bus_name);
-				const Variant has_bus_variant = layout->call(StringName("has_audio_bus"), bus_name);
-				if (has_bus_variant.get_type() != Variant::BOOL || !static_cast<bool>(has_bus_variant)) {
-					return nullptr;
-				}
-
-				Variant bus_variant = layout->call(StringName("get_audio_bus"), bus_name);
+				Variant bus_variant = ClassDB::class_call_static(StringName("FmodServer"), StringName("get_audio_bus"), p_bus_name);
 				return bus_variant;
 			}
 
@@ -118,16 +113,28 @@ namespace godot {
 					return nullptr;
 				}
 
-				const String bus_name = String(p_bus_name);
-				const Variant has_bus_variant = layout->call(StringName("has_audio_bus"), bus_name);
-				if (has_bus_variant.get_type() != Variant::BOOL || !static_cast<bool>(has_bus_variant)) {
+				const Variant bus_id_variant = layout->call(StringName("find_bus_id"), p_bus_name);
+				if (bus_id_variant.get_type() != Variant::INT) {
+					return nullptr;
+				}
+				const int64_t bus_id = bus_id_variant;
+				if (bus_id < 0) {
 					return nullptr;
 				}
 
-				const Variant effect_count_variant = layout->call(StringName("get_bus_effect_count"), bus_name);
-				const int effect_count = std::max(0, static_cast<int>(static_cast<int64_t>(effect_count_variant)));
-				for (int effect_index = 0; effect_index < effect_count; effect_index++) {
-					Variant effect_variant = layout->call(StringName("get_bus_effect"), bus_name, effect_index);
+				const Variant effect_ids_variant = layout->call(StringName("get_bus_effect_ids"), bus_id);
+				if (effect_ids_variant.get_type() != Variant::PACKED_INT64_ARRAY) {
+					return nullptr;
+				}
+				const PackedInt64Array effect_ids = effect_ids_variant;
+				for (int64_t i = 0; i < effect_ids.size(); i++) {
+					const int64_t slot_id = effect_ids[i];
+					const Variant enabled_variant = layout->call(StringName("is_bus_effect_enabled"), bus_id, slot_id);
+					if (enabled_variant.get_type() != Variant::BOOL || !static_cast<bool>(enabled_variant)) {
+						continue;
+					}
+					// Capture buffers and spectrum snapshots belong to the runtime instance.
+					Variant effect_variant = ClassDB::class_call_static(StringName("FmodServer"), StringName("get_bus_effect_instance"), bus_id, slot_id);
 					Object* effect = effect_variant;
 					if (effect && effect->is_class(String(p_effect_class))) {
 						return effect;
@@ -210,7 +217,17 @@ namespace godot {
 		}
 
 		String get_bus_hint_string(int p_backend) {
-			(void)p_backend;
+			if (p_backend == BUS_BACKEND_FMOD_PLAYER) {
+				if (!ClassDB::class_exists(StringName("FmodServer"))) {
+					return String();
+				}
+				const Variant names_variant = ClassDB::class_call_static(StringName("FmodServer"), StringName("get_bus_names"));
+				if (names_variant.get_type() != Variant::PACKED_STRING_ARRAY) {
+					return String();
+				}
+				const PackedStringArray bus_names = names_variant;
+				return String(",").join(bus_names);
+			}
 
 			String bus_list;
 			AudioServer* audio_server = AudioServer::get_singleton();
